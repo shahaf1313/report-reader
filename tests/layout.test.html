@@ -23,6 +23,22 @@ const WIDTHS = [320, 375, 390, 430];
 const ROUTES = [
   ['home', '#/', (d) => d.querySelector('.hero') && d.querySelectorAll('.row').length >= 1],
   ['report', '#/r/2026-09-18', (d) => d.querySelector('.prose h2') && d.querySelector('.outlook')],
+  ['report text is right-aligned and Hebrew lines are RTL', '#/r/2026-09-18', (d, w) => {
+    const blocks = [...d.querySelectorAll('.report p, .report li, .report td, .report th, .report h1, .report h2, .report .m-name')];
+    const bad = blocks.filter((e) => {
+      const hebrew = /[֐-׿]/.test(e.textContent);
+      const align = w.getComputedStyle(e).textAlign;
+      return (hebrew && w.getComputedStyle(e).direction !== 'rtl') || !['right', 'start', '-webkit-right'].includes(align)
+        || (align === 'start' && w.getComputedStyle(e).direction !== 'rtl');
+    });
+    if (bad.length) throw new Error(bad.slice(0, 3).map((e) => e.textContent.slice(0, 30)).join(' | '));
+    return blocks.length > 10;
+  }],
+  ['report pager sits on the right when alone', '#/r/2026-08-28', (d) => {
+    const nav = d.querySelector('.pager').getBoundingClientRect();
+    const link = d.querySelector('.pager-link').getBoundingClientRect();
+    return Math.abs(nav.right - link.right) < 2;
+  }],
   ['report without markets', '#/r/2026-08-28', (d) => d.querySelector('.prose') && !d.querySelector('.markets')],
   ['unknown report', '#/r/1999-01-01', (d) => /לא נמצא/.test(d.querySelector('h1')?.textContent || '')],
   ['bad route', '#/whatever', (d) => /לא נמצא/.test(d.querySelector('h1')?.textContent || '')],
@@ -60,10 +76,10 @@ for (const width of WIDTHS) {
     await wait(700);
     const d = f.contentDocument, w = f.contentWindow;
     let rendered = false;
-    try { rendered = !!check(d, w); } catch (e) { rendered = false; }
+    try { rendered = !!check(d, w); } catch (e) { rendered = `false (${e.message})`; }
     await wait(50);
     const over = overflowing(d);
-    const pass = rendered && d.documentElement.scrollWidth <= d.documentElement.clientWidth && !over.length;
+    const pass = rendered === true && d.documentElement.scrollWidth <= d.documentElement.clientWidth && !over.length;
     results.push([pass, `${width}px ${name}` + (pass ? '' : `\n    rendered=${rendered} scrollWidth=${d.documentElement.scrollWidth}/${d.documentElement.clientWidth} ${over.join(', ')}`)]);
     f.remove();
   }
