@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Layout tests</title>
+<style>
+  body { font: 14px/1.5 system-ui; margin: 24px; }
+  iframe { border: 1px solid #999; height: 700px; vertical-align: top; }
+  .pass { color: #1C7A45; } .fail { color: #B23A2E; font-weight: 600; }
+  pre { white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<h1>Layout tests</h1>
+<p id="summary">running…</p>
+<pre id="log"></pre>
+<div id="frames"></div>
+<script type="module">
+// Loads the app at phone widths and checks that nothing overflows sideways
+// and that each view renders what it should. Point it at the sample data:
+//   python scripts/serve.py --samples
+const WIDTHS = [320, 375, 390, 430];
+const ROUTES = [
+  ['home', '#/', (d) => d.querySelector('.hero') && d.querySelectorAll('.row').length >= 1],
+  ['report', '#/r/2026-09-18', (d) => d.querySelector('.prose h2') && d.querySelector('.outlook')],
+  ['report without markets', '#/r/2026-08-28', (d) => d.querySelector('.prose') && !d.querySelector('.markets')],
+  ['unknown report', '#/r/1999-01-01', (d) => /לא נמצא/.test(d.querySelector('h1')?.textContent || '')],
+  ['bad route', '#/whatever', (d) => /לא נמצא/.test(d.querySelector('h1')?.textContent || '')],
+  ['search with no hits', '#/', (d, w) => {
+    const input = d.querySelector('.search input');
+    input.value = 'zzzz'; input.dispatchEvent(new w.Event('input'));
+    return d.querySelector('.no-results');
+  }],
+];
+
+const results = [];
+const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+
+function overflowing(doc) {
+  const W = doc.documentElement.clientWidth;
+  return [...doc.body.querySelectorAll('*')]
+    .filter((e) => {
+      const r = e.getBoundingClientRect();
+      if (!r.width) return false;
+      // children of horizontal scrollers are allowed to be wide
+      if (e.closest('.table-wrap, pre')) return false;
+      return r.right > W + 1 || r.left < -1;
+    })
+    .slice(0, 5)
+    .map((e) => `${e.tagName.toLowerCase()}.${e.className} [${Math.round(e.getBoundingClientRect().left)}..${Math.round(e.getBoundingClientRect().right)}]`);
+}
+
+for (const width of WIDTHS) {
+  for (const [name, hash, check] of ROUTES) {
+    const f = document.createElement('iframe');
+    f.style.width = `${width}px`;
+    document.getElementById('frames').append(f);
+    f.src = `../index.html${hash}`;
+    await new Promise((r) => f.addEventListener('load', r, { once: true }));
+    await wait(700);
+    const d = f.contentDocument, w = f.contentWindow;
+    let rendered = false;
+    try { rendered = !!check(d, w); } catch (e) { rendered = false; }
+    await wait(50);
+    const over = overflowing(d);
+    const pass = rendered && d.documentElement.scrollWidth <= d.documentElement.clientWidth && !over.length;
+    results.push([pass, `${width}px ${name}` + (pass ? '' : `\n    rendered=${rendered} scrollWidth=${d.documentElement.scrollWidth}/${d.documentElement.clientWidth} ${over.join(', ')}`)]);
+    f.remove();
+  }
+}
+
+const fails = results.filter(([p]) => !p);
+document.getElementById('log').innerHTML = results
+  .map(([p, n]) => `<span class="${p ? 'pass' : 'fail'}">${p ? 'PASS' : 'FAIL'}</span> ${n.replace(/</g, '&lt;')}`)
+  .join('\n');
+const s = document.getElementById('summary');
+s.textContent = `RESULT: ${results.length - fails.length}/${results.length} passed`;
+s.className = fails.length ? 'fail' : 'pass';
+</script>
+</body>
+</html>

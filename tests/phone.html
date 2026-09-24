@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Phone preview</title>
+<style>
+  body { margin: 0; padding: 16px; background: #888; display: flex; gap: 16px; flex-wrap: wrap; font: 12px system-ui; }
+  figure { margin: 0; }
+  iframe { width: 390px; height: 844px; border: 0; border-radius: 28px; background: #fff; display: block; }
+  figcaption { color: #fff; padding: 4px 8px; }
+</style>
+</head>
+<body>
+  <!-- Preview the app at iPhone width. ?path=#/r/2026-09-18 opens a report. -->
+  <figure><iframe id="a"></iframe><figcaption>light, 390 x 844</figcaption></figure>
+  <figure><iframe id="b" style="width:320px;height:640px"></iframe><figcaption>narrow, 320 x 640</figcaption></figure>
+  <script>
+    const q = new URLSearchParams(location.search);
+    const path = q.get('path') || '';
+    if (q.get('h')) document.getElementById('a').style.height = q.get('h') + 'px';
+    document.getElementById('a').src = '../' + path;
+    document.getElementById('b').src = '../' + path;
+  </script>
+</body>
+</html>

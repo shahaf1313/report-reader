@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Reader unit tests</title>
+<style>
+  body { font: 14px/1.5 system-ui; margin: 24px; }
+  .pass { color: #1C7A45; } .fail { color: #B23A2E; font-weight: 600; }
+  pre { white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<h1>Reader unit tests</h1>
+<p id="summary">running…</p>
+<pre id="log"></pre>
+<script src="../vendor/marked.min.js"></script>
+<script src="../vendor/purify.min.js"></script>
+<script type="module">
+import * as L from '../app/lib.js';
+import { renderMarkdown } from '../app/render.js';
+
+const results = [];
+function test(name, fn) {
+  try { fn(); results.push([true, name]); }
+  catch (e) { results.push([false, `${name}\n    ${e.message}`]); }
+}
+function eq(actual, expected, msg = '') {
+  const a = JSON.stringify(actual), b = JSON.stringify(expected);
+  if (a !== b) throw new Error(`${msg} expected ${b}, got ${a}`);
+}
+function ok(cond, msg) { if (!cond) throw new Error(msg || 'expected truthy'); }
+const html = (frag) => { const d = document.createElement('div'); d.append(frag); return d; };
+
+// ---- dates ----
+test('parseDate is local, not UTC (no off-by-one day west of Greenwich)', () => {
+  const d = L.parseDate('2026-09-25');
+  eq([d.getFullYear(), d.getMonth(), d.getDate()], [2026, 8, 25]);
+});
+test('parseDate rejects impossible and malformed dates', () => {
+  for (const s of ['2026-02-30', '2026-13-01', '2026-9-5', '', null, undefined, 'x', '2026-09-25T10:00']) {
+    eq(L.parseDate(s), null, String(s));
+  }
+});
+test('parseDate accepts leap day only in leap years', () => {
+  ok(L.parseDate('2028-02-29'));
+  eq(L.parseDate('2026-02-29'), null);
+});
+test('formatDate is Hebrew and empty for bad input', () => {
+  ok(/ספטמבר/.test(L.formatDate('2026-09-25')), L.formatDate('2026-09-25'));
+  eq(L.formatDate('bad'), '');
+});
+test('isoWeek handles year boundaries', () => {
+  eq(L.isoWeek('2026-09-25'), 39);
+  eq(L.isoWeek('2027-01-01'), 53);   // Friday belongs to week 53 of 2026
+  eq(L.isoWeek('2026-01-01'), 1);
+  eq(L.isoWeek('2021-01-01'), 53);
+  eq(L.isoWeek('nope'), null);
+});
+
+// ---- grouping / search ----
+const R = [
+  { id: '2027-01-01', date: '2027-01-01', title: 'שנה חדשה', summary: 'ריבית', tags: [] },
+  { id: '2026-12-25', date: '2026-12-25', title: 'חג', summary: '', tags: ['נפט'] },
+  { id: '2026-12-18', date: '2026-12-18', title: 'הפד חתך', summary: 'S&P 500 עלה', tags: ['מט"ח'] },
+  { id: 'x', date: '', title: 'ללא תאריך', summary: '', tags: [] },
+];
+test('groupByMonth keeps order and splits across a year boundary', () => {
+  const g = L.groupByMonth(R);
+  eq(g.map((x) => [x.key, x.items.length]), [['2027-01', 1], ['2026-12', 2], ['undated', 1]]);
+});
+test('groupByMonth on empty list', () => eq(L.groupByMonth([]), []));
+test('filterReports: empty/whitespace query returns everything', () => {
+  eq(L.filterReports(R, '   ').length, 4);
+});
+test('filterReports matches tags, summary, English, and all terms', () => {
+  eq(L.filterReports(R, 'נפט').map((r) => r.id), ['2026-12-25']);
+  eq(L.filterReports(R, 's&p').map((r) => r.id), ['2026-12-18']);
+  eq(L.filterReports(R, 'הפד s&p').map((r) => r.id), ['2026-12-18']);
+  eq(L.filterReports(R, 'הפד נפט').length, 0);
+});
+test('filterReports ignores gershayim and niqqud differences', () => {
+  eq(L.filterReports(R, 'מטח').map((r) => r.id), ['2026-12-18']);
+  eq(L.filterReports(R, 'מט״ח').map((r) => r.id), ['2026-12-18']);
+  eq(L.filterReports(R, 'חַג').map((r) => r.id), ['2026-12-25']);
+});
+test('filterReports finds by Hebrew month name and ISO date', () => {
+  ok(L.filterReports(R, 'דצמבר').length === 2);
+  eq(L.filterReports(R, '2027-01').map((r) => r.id), ['2027-01-01']);
+});
+test('filterReports tolerates missing fields', () => {
+  eq(L.filterReports([{ id: 'a' }], 'x'), []);
+});
+
+// ---- routing ----
+test('parseRoute basic', () => {
+  eq(L.parseRoute(''), { view: 'home' });
+  eq(L.parseRoute('#/'), { view: 'home' });
+  eq(L.parseRoute('#/r/2026-09-25'), { view: 'report', id: '2026-09-25' });
+  eq(L.parseRoute('#/r/2026-09-25/'), { view: 'report', id: '2026-09-25' });
+});
+test('parseRoute rejects traversal, junk and bad encoding', () => {
+  for (const h of ['#/r/..%2F..%2Fsecret', '#/r/%E0%A4%A', '#/r/', '#/x', '#/r/a/b', '#/r/<script>', '#/r/%3Cimg%3E']) {
+    eq(L.parseRoute(h).view, 'notfound', h);
+  }
+});
+test('reportHref round-trips through parseRoute', () => {
+  eq(L.parseRoute(L.reportHref('2026-09-25-special')), { view: 'report', id: '2026-09-25-special' });
+});
+
+// ---- markdown helpers ----
+test('stripFrontMatter handles BOM, CRLF, no front matter, and EOF', () => {
+  eq(L.stripFrontMatter('﻿---\r\ntitle: x\r\n---\r\nbody'), 'body');
+  eq(L.stripFrontMatter('---\na: 1\n---'), '');
+  eq(L.stripFrontMatter('no front matter'), 'no front matter');
+  eq(L.stripFrontMatter('text\n---\nnot front matter\n---\n'), 'text\n---\nnot front matter\n---\n');
+  eq(L.stripFrontMatter(null), '');
+});
+test('stripLeadingTitle only removes an identical H1', () => {
+  eq(L.stripLeadingTitle('# הפד חתך\n\nטקסט', 'הפד חתך'), '\nטקסט');
+  eq(L.stripLeadingTitle('# משהו אחר\nטקסט', 'הפד חתך'), '# משהו אחר\nטקסט');
+  eq(L.stripLeadingTitle('## הפד חתך\n', 'הפד חתך'), '## הפד חתך\n');
+});
+
+// ---- market data ----
+test('changeDirection handles signs, unicode minus, and junk', () => {
+  eq(['+1.8%', '−0.9%', '-2.3', '0.0%', '', null, 'n/a', '+0', '1,200'].map(L.changeDirection),
+     ['up', 'down', 'down', 'flat', 'flat', 'flat', 'flat', 'flat', 'up']);
+});
+test('clampMood', () => {
+  eq([2, 7, -9, '1', 0.4, -1.6, null, undefined, '', 'x', NaN].map(L.clampMood),
+     [2, 2, -2, 1, 0, -2, null, null, null, null, null]);
+});
+test('moodPoints: null with <2 moods, newest on the right, clamped y', () => {
+  eq(L.moodPoints([{ mood: 1 }, { mood: null }], 100, 50), null);
+  const pts = L.moodPoints([{ id: 'n', mood: 2 }, { id: 'o', mood: -2 }], 100, 50);
+  ok(pts[0].x > pts[1].x, 'newest should be right-most');
+  eq([pts[0].y, pts[1].y], [6, 44]);
+});
+test('moodPoints caps the window', () => {
+  const many = Array.from({ length: 60 }, (_, i) => ({ id: String(i), mood: i % 5 - 2 }));
+  eq(L.moodPoints(many, 300, 60).length, 26);
+});
+test('readingMinutes', () => {
+  eq([0, -1, 'x', 50, 200, 1000].map(L.readingMinutes), [null, null, null, 1, 1, 5]);
+});
+
+// ---- rendering and sanitising ----
+test('renderMarkdown strips scripts, handlers and javascript: URLs', () => {
+  const d = html(renderMarkdown('<script>window.pwned=1<\/script>\n\n<img src=x onerror="window.pwned=1">\n\n[x](javascript:alert(1))\n\n<iframe src="https://evil"></iframe>'));
+  ok(!d.querySelector('script, iframe'), 'script/iframe survived');
+  ok(!d.innerHTML.includes('onerror'), 'handler survived');
+  ok(!d.innerHTML.includes('javascript:'), 'js url survived');
+  ok(!window.pwned, 'script ran');
+});
+test('renderMarkdown: external links open safely, internal ones do not', () => {
+  const d = html(renderMarkdown('[a](https://example.com) [b](#/r/2026-09-18)'));
+  const [a, b] = d.querySelectorAll('a');
+  eq([a.target, a.rel], ['_blank', 'noopener noreferrer']);
+  eq(b.target, '');
+});
+test('renderMarkdown: h1 demoted, tables wrapped, dir=auto on blocks', () => {
+  const d = html(renderMarkdown('# Big\n\npara\n\n| a | b |\n|---|---|\n| 1 | 2 |'));
+  ok(!d.querySelector('h1'));
+  ok(d.querySelector('h2').textContent === 'Big');
+  ok(d.querySelector('.table-wrap > table'));
+  eq(d.querySelector('p').getAttribute('dir'), 'auto');
+});
+test('renderMarkdown survives empty and odd input', () => {
+  eq(html(renderMarkdown('')).innerHTML, '');
+  eq(html(renderMarkdown(null)).innerHTML, '');
+  ok(html(renderMarkdown('```\nunclosed')).querySelector('pre'));
+});
+
+// ---- report ----
+const fails = results.filter(([p]) => !p);
+document.getElementById('log').innerHTML = results
+  .map(([p, n]) => `<span class="${p ? 'pass' : 'fail'}">${p ? 'PASS' : 'FAIL'}</span> ${n.replace(/</g, '&lt;')}`)
+  .join('\n');
+const summary = document.getElementById('summary');
+summary.textContent = `RESULT: ${results.length - fails.length}/${results.length} passed`;
+summary.className = fails.length ? 'fail' : 'pass';
+document.title = fails.length ? 'FAIL' : 'PASS';
+</script>
+</body>
+</html>
