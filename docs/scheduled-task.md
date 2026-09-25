@@ -13,6 +13,10 @@
 
 המחשב צריך להיות דלוק והאפליקציה פתוחה בזמן הריצה. אם זה לא מתאים, אפשר להריץ את אותו הפרומפט כמשימה בענן (Claude Code routine) שמחוברת למאגר.
 
+## ריצה בענן דרך GitHub Actions (מומלץ)
+
+הקובץ `.github/workflows/weekly-report.yml` מריץ את אותו הפרומפט בשרתים של GitHub בכל יום שישי בבוקר, כך שהמחשב לא צריך להיות דלוק. הגדרה חד־פעמית: להריץ במחשב `claude setup-token`, ולהוסיף את האסימון כ־secret בשם `CLAUDE_CODE_OAUTH_TOKEN` במאגר (Settings ← Secrets and variables ← Actions). אם הדוח של היום כבר קיים, הריצה מדלגת. אפשר להריץ ידנית מלשונית Actions (Run workflow).
+
 ## הפרומפט
 
 ```text

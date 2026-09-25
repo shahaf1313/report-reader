@@ -1,0 +1,92 @@
+name: Weekly report
+
+# Runs on GitHub's servers, so it doesn't need your computer to be on.
+# One-time setup: add the repo secret CLAUDE_CODE_OAUTH_TOKEN
+# (create it on your computer with `claude setup-token`).
+
+on:
+  schedule:
+    # Fridays 03:47 UTC = 06:47 Israel summer time / 05:47 winter time.
+    # GitHub may start scheduled runs a few minutes late.
+    - cron: "47 3 * * 5"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Write a report even if today's already exists (-2 file)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: weekly-report
+  cancel-in-progress: false
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install pyyaml
+
+      - name: Check whether today's report already exists
+        id: check
+        run: |
+          today=$(TZ=Asia/Jerusalem date +%F)
+          echo "today=$today" >> "$GITHUB_OUTPUT"
+          if [ -f "reports/$today.md" ] && [ "${{ inputs.force }}" != "true" ]; then
+            echo "reports/$today.md already exists, skipping."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Git identity
+        if: steps.check.outputs.skip != 'true'
+        run: |
+          git config user.name "Weekly Report Bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Write the report with Claude
+        if: steps.check.outputs.skip != 'true'
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: |
+            You are running inside GitHub Actions in a checkout of ${{ github.repository }} (branch main).
+            Today's date in Israel is ${{ steps.check.outputs.today }}.
+            Python 3.12 with pyyaml is installed, and git push already works (no password needed).
+            When looking for "the previous report" in reports/, ignore files starting with "_" and index.json.
+
+            Read docs/scheduled-task.md and carry out, exactly and from start to finish,
+            the prompt in the code block under the heading "## הפרומפט".
+            That file is the source of truth. The report format spec is docs/report-format.md.
+          claude_args: |
+            --max-turns 80
+            --allowedTools Read,Write,Edit,Glob,Grep,WebSearch,WebFetch,Bash
+
+      - name: Make sure the commit is pushed
+        if: steps.check.outputs.skip != 'true'
+        run: |
+          git status -sb
+          if [ -n "$(git log origin/main..HEAD --oneline)" ]; then
+            git pull --rebase && git push
+          fi
+          test -z "$(git log origin/main..HEAD --oneline)"
+
+      # Pushes made with the workflow token don't trigger other workflows,
+      # so start the site deploy explicitly.
+      - name: Deploy the site
+        if: steps.check.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run pages.yml --ref main
