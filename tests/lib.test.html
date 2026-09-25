@@ -140,6 +140,14 @@ test('moodPoints caps the window', () => {
   const many = Array.from({ length: 60 }, (_, i) => ({ id: String(i), mood: i % 5 - 2 }));
   eq(L.moodPoints(many, 300, 60).length, 26);
 });
+test('textDir: any Hebrew is RTL, even when the line opens in English', () => {
+  eq(['Nvidia דיווחה על רבעון חזק', 'S&P 500 עלה', 'עברית', 'Plain English', '+4.1%', '', null].map(L.textDir),
+     ['rtl', 'rtl', 'rtl', 'ltr', 'ltr', 'rtl', 'rtl']);
+});
+test('renderMarkdown: Hebrew blocks that start in English are RTL', () => {
+  const d = html(renderMarkdown('Nvidia דיווחה על רבעון חזק.\n\n- S&P 500 עלה\n\n| חברה | שינוי |\n|---|---|\n| Teva | -2.7% |\n\nOnly English here.'));
+  eq([...d.querySelectorAll('p, li, td, th')].map((e) => e.dir), ['rtl', 'rtl', 'rtl', 'rtl', 'ltr', 'ltr', 'ltr']);
+});
 test('readingMinutes', () => {
   eq([0, -1, 'x', 50, 200, 1000].map(L.readingMinutes), [null, null, null, 1, 1, 5]);
 });
@@ -158,12 +166,12 @@ test('renderMarkdown: external links open safely, internal ones do not', () => {
   eq([a.target, a.rel], ['_blank', 'noopener noreferrer']);
   eq(b.target, '');
 });
-test('renderMarkdown: h1 demoted, tables wrapped, dir=auto on blocks', () => {
+test('renderMarkdown: h1 demoted, tables wrapped, English-only block is LTR', () => {
   const d = html(renderMarkdown('# Big\n\npara\n\n| a | b |\n|---|---|\n| 1 | 2 |'));
   ok(!d.querySelector('h1'));
   ok(d.querySelector('h2').textContent === 'Big');
   ok(d.querySelector('.table-wrap > table'));
-  eq(d.querySelector('p').getAttribute('dir'), 'auto');
+  eq(d.querySelector('p').getAttribute('dir'), 'ltr');
 });
 test('renderMarkdown survives empty and odd input', () => {
   eq(html(renderMarkdown('')).innerHTML, '');
