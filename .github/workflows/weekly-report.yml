@@ -72,7 +72,10 @@ jobs:
             Today's date in Israel is ${{ steps.check.outputs.today }}. Use it as the report date and file name
             (reports/${{ steps.check.outputs.today }}.md, or -2 if that file exists). If today is not Friday,
             still write the report for the most recent week that ended with Thursday's close.
-            Python 3.12 with pyyaml is installed, and git commit/push already work (no password needed).
+            ${{ inputs.force && 'This run was started by hand with force=true: the owner explicitly wants a new report today even though one already exists. Do not skip and do not second-guess this from the git history. Write reports/<date>-2.md (or the next free suffix), commit and push it.' || '' }}
+            Git commit/push already work (no password needed). The shell is limited to git, ls, date, wc, grep,
+            head, tail and `python scripts/build_index.py`; anything else (including ad-hoc python scripts) is
+            denied, so don't spend turns trying.
             When looking for "the previous report" in reports/, ignore files starting with "_" and index.json.
 
             Read docs/scheduled-task.md and carry out, exactly and from start to finish,
