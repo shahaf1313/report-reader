@@ -86,7 +86,7 @@ jobs:
           # environment, or touch anything outside git and the index builder.
           claude_args: |
             --max-turns 80
-            --allowedTools "Read,Write,Edit,Glob,Grep,WebSearch,WebFetch,Bash(git pull:*),Bash(git add:*),Bash(git commit:*),Bash(git push:*),Bash(git log:*),Bash(git status:*),Bash(git diff:*),Bash(date:*),Bash(ls:*),Bash(python scripts/build_index.py:*)"
+            --allowedTools "Read,Write,Edit,Glob,Grep,WebSearch,WebFetch,Bash(git pull:*),Bash(git add:*),Bash(git commit:*),Bash(git push:*),Bash(git log:*),Bash(git status:*),Bash(git diff:*),Bash(date:*),Bash(ls:*),Bash(wc:*),Bash(grep:*),Bash(head:*),Bash(tail:*),Bash(python scripts/build_index.py:*)"
 
       - name: Make sure the commit is pushed
         if: steps.check.outputs.skip != 'true'
