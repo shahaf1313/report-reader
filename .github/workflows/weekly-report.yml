@@ -29,11 +29,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.12"
 
@@ -60,7 +60,7 @@ jobs:
       - name: Write the report with Claude
         id: claude
         if: steps.check.outputs.skip != 'true'
-        uses: anthropics/claude-code-action@v1
+        uses: anthropics/claude-code-action@756cc22e19660d20e8cc9496b4f242475a7f7790 # v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ github.token }}
@@ -81,9 +81,12 @@ jobs:
 
             The run only counts as done when the new report file is committed and pushed to origin/main.
             Verify with `git log origin/main -1 --stat` before you finish.
+          # Claude reads untrusted web pages here, so the shell is limited to the
+          # commands the prompt needs. A prompt injection can't run curl, read the
+          # environment, or touch anything outside git and the index builder.
           claude_args: |
             --max-turns 80
-            --allowedTools Read,Write,Edit,Glob,Grep,WebSearch,WebFetch,Bash
+            --allowedTools "Read,Write,Edit,Glob,Grep,WebSearch,WebFetch,Bash(git pull:*),Bash(git add:*),Bash(git commit:*),Bash(git push:*),Bash(git log:*),Bash(git status:*),Bash(git diff:*),Bash(date:*),Bash(ls:*),Bash(python scripts/build_index.py:*)"
 
       - name: Make sure the commit is pushed
         if: steps.check.outputs.skip != 'true'
