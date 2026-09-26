@@ -45,6 +45,7 @@ jobs:
         run: |
           today=$(TZ=Asia/Jerusalem date +%F)
           echo "today=$today" >> "$GITHUB_OUTPUT"
+          echo "before=$(ls reports/*.md 2>/dev/null | wc -l)" >> "$GITHUB_OUTPUT"
           if [ -f "reports/$today.md" ] && [ "${{ inputs.force }}" != "true" ]; then
             echo "reports/$today.md already exists, skipping."
             echo "skip=true" >> "$GITHUB_OUTPUT"
@@ -57,6 +58,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
       - name: Write the report with Claude
+        id: claude
         if: steps.check.outputs.skip != 'true'
         uses: anthropics/claude-code-action@v1
         with:
@@ -64,14 +66,22 @@ jobs:
           github_token: ${{ github.token }}
           show_full_output: true
           prompt: |
-            You are running inside GitHub Actions in a checkout of ${{ github.repository }} (branch main).
-            Today's date in Israel is ${{ steps.check.outputs.today }}.
-            Python 3.12 with pyyaml is installed, and git push already works (no password needed).
+            You are running unattended inside GitHub Actions, in a checkout of ${{ github.repository }} (branch main).
+            Nobody will read or answer questions during this run. Never stop to ask anything:
+            make the most reasonable choice, note it in the report if relevant, and keep going until the end.
+
+            Today's date in Israel is ${{ steps.check.outputs.today }}. Use it as the report date and file name
+            (reports/${{ steps.check.outputs.today }}.md, or -2 if that file exists). If today is not Friday,
+            still write the report for the most recent week that ended with Thursday's close.
+            Python 3.12 with pyyaml is installed, and git commit/push already work (no password needed).
             When looking for "the previous report" in reports/, ignore files starting with "_" and index.json.
 
             Read docs/scheduled-task.md and carry out, exactly and from start to finish,
             the prompt in the code block under the heading "## הפרומפט".
             That file is the source of truth. The report format spec is docs/report-format.md.
+
+            The run only counts as done when the new report file is committed and pushed to origin/main.
+            Verify with `git log origin/main -1 --stat` before you finish.
           claude_args: |
             --max-turns 80
             --allowedTools Read,Write,Edit,Glob,Grep,WebSearch,WebFetch,Bash
@@ -84,6 +94,63 @@ jobs:
             git pull --rebase && git push
           fi
           test -z "$(git log origin/main..HEAD --oneline)"
+          git fetch -q origin main
+          after=$(git ls-tree --name-only origin/main reports/ | grep -c '\.md$' || true)
+          echo "reports before: ${{ steps.check.outputs.before }}, after: $after"
+          if [ "$after" -le "${{ steps.check.outputs.before }}" ]; then
+            echo "::error title=No new report::Claude finished but no new report was pushed to main. See the ci-logs branch for its transcript."
+            exit 1
+          fi
+
+      # Saves a short transcript of Claude's run to the ci-logs branch
+      # (runs/<run id>.md) so failures can be diagnosed without the raw log.
+      - name: Save Claude transcript
+        if: always() && steps.check.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXEC_FILE: ${{ steps.claude.outputs.execution_file }}
+        run: |
+          f="${EXEC_FILE:-$RUNNER_TEMP/claude-execution-output.json}"
+          out="$RUNNER_TEMP/transcript.md"
+          python3 - "$f" "$out" <<'EOF'
+          import json, sys
+          src, dst = sys.argv[1], sys.argv[2]
+          try:
+              data = json.load(open(src, encoding="utf-8"))
+          except Exception as e:
+              open(dst, "w").write(f"could not read {src}: {e}\n"); sys.exit(0)
+          def short(x, n=400):
+              x = x if isinstance(x, str) else json.dumps(x, ensure_ascii=False)
+              return x if len(x) <= n else x[:n] + " ..."
+          lines = []
+          for m in data if isinstance(data, list) else [data]:
+              t = m.get("type")
+              if t == "result":
+                  lines.insert(0, "## result\n" + "\n".join(f"- {k}: {short(m.get(k), 3000)}" for k in
+                      ("subtype", "is_error", "num_turns", "duration_ms", "total_cost_usd", "result")) + "\n\n## transcript")
+              elif t in ("assistant", "user"):
+                  content = (m.get("message") or {}).get("content") or []
+                  if isinstance(content, str): content = [{"type": "text", "text": content}]
+                  for c in content:
+                      k = c.get("type")
+                      if k == "text": lines.append(f"**{t}:** {short(c['text'], 1500)}")
+                      elif k == "tool_use": lines.append(f"**tool {c.get('name')}:** `{short(c.get('input'))}`")
+                      elif k == "tool_result": lines.append(f"  -> {short(c.get('content'))}")
+          open(dst, "w", encoding="utf-8").write("\n\n".join(lines) + "\n")
+          EOF
+          cd "$RUNNER_TEMP" && rm -rf cilog
+          git clone -q --no-checkout "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" cilog
+          cd cilog
+          if git ls-remote --exit-code origin ci-logs >/dev/null 2>&1; then
+            git checkout -q ci-logs
+          else
+            git checkout -q --orphan ci-logs && git rm -rqf --cached . >/dev/null 2>&1 || true
+          fi
+          mkdir -p runs && cp "$out" "runs/${GITHUB_RUN_ID}.md"
+          git add runs
+          git -c user.name="Weekly Report Bot" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+            commit -qm "Transcript of run ${GITHUB_RUN_ID}"
+          git push -q origin ci-logs
 
       # Pushes made with the workflow token don't trigger other workflows,
       # so start the site deploy explicitly.
