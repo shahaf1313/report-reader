@@ -89,11 +89,15 @@ jobs:
           # environment, or touch anything outside git and the index builder.
           claude_args: |
             --model claude-sonnet-5-5
-            --max-turns 80
+            --max-turns 150
             --allowedTools "Read,Write,Edit,Glob,Grep,WebSearch,WebFetch,Bash(git pull:*),Bash(git add:*),Bash(git commit:*),Bash(git push:*),Bash(git log:*),Bash(git status:*),Bash(git diff:*),Bash(date:*),Bash(ls:*),Bash(wc:*),Bash(grep:*),Bash(head:*),Bash(tail:*),Bash(python scripts/build_index.py:*)"
 
+      # Runs even if the Claude step failed: it can fail after the report was
+      # already pushed (e.g. over the turn limit), and then the site must still
+      # be deployed. If no new report exists, this step fails instead.
       - name: Make sure the commit is pushed
-        if: steps.check.outputs.skip != 'true'
+        id: verify
+        if: ${{ !cancelled() && steps.check.outputs.skip != 'true' }}
         run: |
           git status -sb
           if [ -n "$(git log origin/main..HEAD --oneline)" ]; then
@@ -161,7 +165,7 @@ jobs:
       # Pushes made with the workflow token don't trigger other workflows,
       # so start the site deploy explicitly.
       - name: Deploy the site
-        if: steps.check.outputs.skip != 'true'
+        if: ${{ !cancelled() && steps.verify.outcome == 'success' }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh workflow run pages.yml --ref main
